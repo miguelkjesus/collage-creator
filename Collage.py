@@ -1,6 +1,8 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from PIL import Image, ImageFile
 import numpy as np
 import random
+import time
 
 from Mutation import Mutation
 
@@ -27,11 +29,12 @@ class Collage:
         self.only_improvements = only_improvements
 
         self.iterations = 100000
-        self.population = 200  # number of mutations to create
-        self.selection_num = 10  # number of mutations to keep every evolution
-        self.evolutions = 1  # how many times mutations should evolve
+        self.population = 2000  # number of mutations to create
+        self.selection_num = 100  # number of mutations to keep every evolution
+        self.evolutions = 2  # how many times mutations should evolve
 
         self.max_scale = 2  # relative to the longest edge of the target
+        self.num_threads = 4
 
         self.best_mutations: list[tuple[float, Mutation]] = []
 
@@ -77,27 +80,42 @@ class Collage:
         return 1 - mse / (255**2)
 
     def get_initial_population(self) -> None:
-        i = 0
-        while i < self.population:
-            mut = self.random_mutation()
-            score = self.get_score(mut)
-            if score is None:
-                continue
-            self.register_mutation(mut, score)
-            i += 1
+        mutations = (self.random_mutation() for _ in range(self.population))
+
+        with ThreadPoolExecutor(max_workers=self.num_threads) as executor:
+            future_to_mutation = {
+                executor.submit(self.get_score, mut): mut for mut in mutations
+            }
+            for future in as_completed(future_to_mutation):
+                mut = future_to_mutation[future]
+                try:
+                    score = future.result()
+                    if score is not None:
+                        self.register_mutation(mut, score)
+                except Exception as exc:
+                    print(f"Mutation {mut} generated an exception: {exc}")
 
     def evolve(self) -> None:
-        num_children = self.population // len(self.best_mutations) - 1
-        for _, mut in self.best_mutations:
-            i = 0
-            while i < num_children:
-                child = mut.mutate()
-                score = self.get_score(child)
-                if score is None:
-                    continue
+        num_children = self.population // len(self.best_mutations)
 
-                self.register_mutation(child, score)
-                i += 1
+        mutations = []
+        for _, mut in self.best_mutations:
+            for _ in range(num_children):
+                child = mut.mutate()
+                mutations.append(child)
+
+        with ThreadPoolExecutor(max_workers=self.num_threads) as executor:
+            future_to_mutation = {
+                executor.submit(self.get_score, mut): mut for mut in mutations
+            }
+            for future in as_completed(future_to_mutation):
+                mut = future_to_mutation[future]
+                try:
+                    score = future.result()
+                    if score is not None:
+                        self.register_mutation(mut, score)
+                except Exception as exc:
+                    print(f"Mutation {mut} generated an exception: {exc}")
 
     def random_mutation(self) -> Mutation:
         image = random.choice(self.inputs)
