@@ -1,14 +1,22 @@
+from typing import Generator
 from PIL import Image, ImageFile
-from glob import glob
+from glob import iglob
 import numpy as np
+import os.path
 
 
-def load(path: str) -> ImageFile.ImageFile:
-    return Image.open(path)
+def load(path: str) -> ImageFile.ImageFile | None:
+    if os.path.isfile(path):
+        return Image.open(path)
+    else:
+        return None
 
 
-def load_glob(glob_path: str) -> list[ImageFile.ImageFile]:
-    return [load(path) for path in glob(glob_path, recursive=True)]
+def load_glob(glob_path: str) -> Generator[ImageFile.ImageFile, None, None]:
+    for path in iglob(glob_path, recursive=True):
+        file = load(path)
+        if file is not None:
+            yield file
 
 
 def rotate(image: Image.Image, angle: float) -> Image.Image:

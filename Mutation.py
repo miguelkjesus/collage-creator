@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import Union, Callable, Collection, Any
 from PIL import Image
 import numpy as np
 import random
@@ -7,8 +8,11 @@ import random
 from Image import transform, average_color, set_color
 
 
-def lerp(a, b, t):
-    return np.interp(t, [0, 1], [a, b])
+type numeric = Union[int, float, np.number[Any]]
+
+
+def lerp(a: numeric, b: numeric, t: numeric) -> numeric:
+    return (1 - t) * a + t * b
 
 
 class Mutation:
@@ -38,12 +42,22 @@ class Mutation:
     def __repr__(self) -> str:
         return f"Mutation(pos=({float(self.normalised_position[0]):.3f}, {float(self.normalised_position[1]):.3f}), angle={float(self.angle):.1f}, size=({int(self.size[0])}, {int(self.size[1])}))"
 
-    def _mutate_value(self, value, factor, value_type=float):
+    def _mutate_value[
+        T: numeric
+    ](self, value: numeric, factor: numeric, value_type: Callable[[numeric], T]) -> T:
         return value_type(random.uniform(value / factor, value * factor))
 
-    def _mutate_values(self, values, factor, value_type=float, array_type=tuple):
+    def _mutate_values[
+        T: numeric, U: Collection[T]  # type: ignore
+    ](
+        self,
+        values: Collection[numeric],
+        factor: numeric,
+        value_type: Callable[[numeric], T],
+        array_type: Callable[[Collection[numeric]], U],
+    ) -> U:
         return array_type(
-            self._mutate_value(value, factor, value_type) for value in values
+            [self._mutate_value(value, factor, value_type) for value in values]
         )
 
     def _get_position(
@@ -81,9 +95,9 @@ class Mutation:
     def mutate(self) -> Mutation:
         return Mutation(
             self.image,
-            self._mutate_values(self.normalised_position, self.pos_factor, float),
+            self._mutate_values(self.normalised_position, self.pos_factor, float),  # type: ignore
             self._mutate_value(self.angle, self.angle_factor, float),
-            self._mutate_values(self.size, self.size_factor, int),
+            self._mutate_values(self.size, self.size_factor, int),  # type: ignore
             self.pos_factor * self.factor_factor,
             self.angle_factor * self.factor_factor,
             self.size_factor * self.factor_factor,
