@@ -13,7 +13,8 @@ def main():
     parser.add_argument("-e", "--evolutions", required=True, type=int)
     parser.add_argument("-f", "--fittest-num", required=True, type=int)
     parser.add_argument("-I", "--iterations", type=int)
-    parser.add_argument("-v", "--video")  # TODO
+    parser.add_argument("-v", "--video")
+    parser.add_argument("--fps", type=int)
     parser.add_argument("--lock-aspect-ratio", action="store_true")
     parser.add_argument("--only-improvements", action="store_true")
     parser.add_argument("--num-processes", type=int)
@@ -24,18 +25,21 @@ def main():
     if target is None:
         return
 
-    Collage(
+    with Collage(
         target=target,
         output=load(args.output),
         output_path=args.output,
         inputs=chain.from_iterable(load_glob(glob) for glob in args.inputs),
+        video_path=args.video,
+        fps=args.fps,
         population=args.population,
         evolutions=args.evolutions,
         fittest_num=args.fittest_num,
         iterations=args.iterations,
         lock_aspect_ratio=args.lock_aspect_ratio,
         only_improvements=args.only_improvements,
-    ).run()
+    ) as collage:
+        collage.run()
 
 
 if __name__ == "__main__":

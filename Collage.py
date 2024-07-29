@@ -1,8 +1,9 @@
-from typing import Iterable, Generator
+from typing import Iterable, Generator, Any
 from multiprocessing import Pool, cpu_count
 from functools import partial
 from PIL import Image
 import numpy as np
+import imageio
 import random
 import time
 
@@ -17,17 +18,20 @@ class Collage:
         inputs: Iterable[Image.Image],
         output: Image.Image | None = None,
         output_path: str,
-        iterations: int = -1,  # how many images to stop add
+        video_path: str | None = None,
+        fps: int | None = None,
+        iterations: int | None = None,  # how many images to stop add
         evolutions: int,  # how many times mutations should evolve
         population: int,  # number of mutations to create
         fittest_num: int,  # number of mutations to keep every evolution
-        lock_aspect_ratio: bool = False,
-        only_improvements: bool = False,
-        num_processes: int = cpu_count(),
+        lock_aspect_ratio: bool | None = None,
+        only_improvements: bool | None = None,
+        num_processes: int | None = None,
         chunk_size: int | None = None,
     ) -> None:
         self.target = target.convert("RGB")
         self.inputs = [input.convert("RGBA") for input in inputs]
+
         self.output = (
             output.convert("RGB")
             if output is not None
@@ -36,22 +40,42 @@ class Collage:
         self.output_path = output_path
         self.output_score = 0
 
-        self.lock_aspect_ratio = lock_aspect_ratio
-        self.only_improvements = only_improvements
+        self.video = None
+        self.video_path = video_path
+        self.fps = fps if fps is not None else 30
 
-        self.iterations = iterations
+        self.lock_aspect_ratio = (
+            lock_aspect_ratio if lock_aspect_ratio is not None else False
+        )
+        self.only_improvements = (
+            only_improvements if only_improvements is not None else False
+        )
+
+        self.iterations = iterations if iterations is not None else -1
         self.population = population
         self.fittest_num = fittest_num
         self.evolutions = evolutions
 
         self.max_scale = 1.1  # relative to the longest edge of the target
 
-        self.num_processes = num_processes
-        self.chunk_size = chunk_size or population // (
-            num_processes * 32
-        )  # XXX pretty arbritrary
+        self.num_processes = num_processes if num_processes is not None else cpu_count()
+        self.chunk_size = (
+            chunk_size
+            if chunk_size is not None
+            else max(population // (self.num_processes * 16), 1)  # XXX arbritrary
+        )
 
         self.best_mutations: list[tuple[float, Mutation]] = []
+
+    def __enter__(self):
+        if self.video_path is not None:
+            self.video = imageio.get_writer(self.video_path, fps=self.fps)  # type: ignore
+
+        return self
+
+    def __exit__(self, *_: Any) -> None:
+        if self.video is not None:
+            self.video.close()
 
     def register_mutation(self, mut: Mutation, score: float) -> None:
         self.best_mutations.append((score, mut))
@@ -63,7 +87,7 @@ class Collage:
         self.best_mutations.clear()
 
         it = 0
-        while it < self.iterations:
+        while it != self.iterations:
             print(f"Iteration {it + 1}:")
             print("\tCreating initial population")
             self.create_initial_population()
@@ -85,17 +109,22 @@ class Collage:
                 continue
             self.output = output
 
-            print(f"\tSaving output to '{self.output_path}'\n")
+            print(f"\tSaving output to '{self.output_path}'")
             self.output.save(self.output_path)
+
+            if self.video is not None:
+                print(f"\tAdding frame to '{self.video_path}'")
+                self.append_to_video(self.output)
+
+            print()
 
             it += 1
 
-    def get_score(self, image: Image.Image) -> float:
-        image_arr = np.array(image)
-        target_arr = np.array(self.target)
-        mse = np.sum((target_arr - image_arr) ** 2)
-        mse /= float(self.target.size[0] * self.target.size[1])
-        return float(1 - mse / (255**2))
+    def append_to_video(self, image: Image.Image) -> None:
+        if self.video is None:
+            return
+
+        self.video.append_data(np.array(image))
 
     def create_initial_population(self) -> None:
         mutations = (self.random_mutation() for _ in range(self.population))
@@ -109,9 +138,11 @@ class Collage:
         start = time.perf_counter()
 
         with Pool(self.num_processes) as pool:
-            process_mutation_with_instance = partial(process_mutation, self)
+            process_mutation_with_state = partial(
+                process_mutation, self.output, self.target
+            )
             for mut, score in pool.imap_unordered(
-                process_mutation_with_instance, mutations, chunksize=self.chunk_size
+                process_mutation_with_state, mutations, chunksize=self.chunk_size
             ):
                 if score is not None:
                     self.register_mutation(mut, score)
@@ -145,8 +176,18 @@ class Collage:
         )
 
 
-def process_mutation(instance: Collage, mut: Mutation) -> tuple[Mutation, float | None]:
-    image = mut.render(instance.output, instance.target)
+def get_score(target: Image.Image, image: Image.Image) -> float:
+    image_arr = np.array(image)
+    target_arr = np.array(target)
+    mse = np.sum((target_arr - image_arr) ** 2)
+    mse /= float(target.size[0] * target.size[1])
+    return float(1 - mse / (255**2))
+
+
+def process_mutation(
+    output: Image.Image, target: Image.Image, mut: Mutation
+) -> tuple[Mutation, float | None]:
+    image = mut.render(output, target)
     if image is None:
         return mut, None
-    return mut, instance.get_score(image)
+    return mut, get_score(target, image)

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Union, Callable, Collection, Any
+from typing import Union, Callable, Iterable, Any
 from PIL import Image
 import numpy as np
 import random
@@ -42,20 +42,18 @@ class Mutation:
     def __repr__(self) -> str:
         return f"Mutation(pos=({float(self.normalised_position[0]):.3f}, {float(self.normalised_position[1]):.3f}), angle={float(self.angle):.1f}, size=({int(self.size[0])}, {int(self.size[1])}))"
 
-    def _mutate_value[
-        T: numeric
-    ](self, value: numeric, factor: numeric, value_type: Callable[[numeric], T]) -> T:
+    def _mutate_value(
+        self, value: numeric, factor: numeric, value_type: Callable[[numeric], numeric]
+    ) -> Any:
         return value_type(random.uniform(value / factor, value * factor))
 
-    def _mutate_values[
-        T: numeric, U: Collection[T]  # type: ignore
-    ](
+    def _mutate_values(
         self,
-        values: Collection[numeric],
+        values: Iterable[numeric],
         factor: numeric,
-        value_type: Callable[[numeric], T],
-        array_type: Callable[[Collection[numeric]], U],
-    ) -> U:
+        value_type: Callable[[numeric], numeric],
+        array_type: Callable[[Iterable[numeric]], Iterable[numeric]],
+    ) -> Any:
         return array_type(
             [self._mutate_value(value, factor, value_type) for value in values]
         )
@@ -95,9 +93,11 @@ class Mutation:
     def mutate(self) -> Mutation:
         return Mutation(
             self.image,
-            self._mutate_values(self.normalised_position, self.pos_factor, float),  # type: ignore
+            self._mutate_values(
+                self.normalised_position, self.pos_factor, float, tuple
+            ),
             self._mutate_value(self.angle, self.angle_factor, float),
-            self._mutate_values(self.size, self.size_factor, int),  # type: ignore
+            self._mutate_values(self.size, self.size_factor, int, tuple),
             self.pos_factor * self.factor_factor,
             self.angle_factor * self.factor_factor,
             self.size_factor * self.factor_factor,
